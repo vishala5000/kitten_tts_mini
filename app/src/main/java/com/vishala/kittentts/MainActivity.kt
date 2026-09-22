@@ -5,7 +5,13 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.view.View
-import android.widget.*
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ProgressBar
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 import java.io.FileInputStream
@@ -23,11 +29,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var status: TextView
 
-    private var modelDir: File? = null
+    private var engineReady = false
 
-    private val voices = arrayOf(
-        "Jasper",
+    private val fallbackVoices = arrayOf(
         "Bella",
+        "Jasper",
         "Luna",
         "Bruno",
         "Rosie",
@@ -51,11 +57,12 @@ class MainActivity : AppCompatActivity() {
         spinner.adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_dropdown_item,
-            voices
+            fallbackVoices
         )
 
         clear.setOnClickListener {
             input.text.clear()
+            input.requestFocus()
         }
 
         generate.setOnClickListener {
@@ -66,58 +73,86 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun prepareModel() {
-        setBusy(true, "Preparing Kitten TTS model…")
+        setBusy(true, "Loading Kitten TTS model...")
 
         executor.execute {
             try {
-                val dir = File(filesDir, "kitten-model").apply {
-                    mkdirs()
-                }
+                val modelDir = File(filesDir, "kitten-model")
+                modelDir.mkdirs()
+
+                val modelFile = File(
+                    modelDir,
+                    "kitten_tts_mini_v0_8.onnx"
+                )
+
+                val voicesFile = File(
+                    modelDir,
+                    "voices.npz"
+                )
+
+                val configFile = File(
+                    modelDir,
+                    "config.json"
+                )
 
                 copyAssetIfNeeded(
                     "model/kitten_tts_mini_v0_8.onnx",
-                    File(dir, "kitten_tts_mini_v0_8.onnx"),
-                    78L * 1024 * 1024
+                    modelFile,
+                    70L * 1024L * 1024L
                 )
 
                 copyAssetIfNeeded(
                     "model/voices.npz",
-                    File(dir, "voices.npz"),
-                    3L * 1024 * 1024
+                    voicesFile,
+                    1024L * 1024L
                 )
 
                 copyAssetIfNeeded(
                     "model/config.json",
-                    File(dir, "config.json"),
-                    256
+                    configFile,
+                    100L
                 )
 
-                val error = NativeBridge.init(
-                    File(dir, "kitten_tts_mini_v0_8.onnx").absolutePath,
-                    File(dir, "voices.npz").absolutePath,
-                    File(dir, "config.json").absolutePath
+                val result = KittenNative.initialize(
+                    modelFile.absolutePath,
+                    voicesFile.absolutePath,
+                    configFile.absolutePath
                 )
 
-                if (error.isNotEmpty()) {
-                    throw IllegalStateException(error)
+                if (!result.success) {
+                    throw IllegalStateException(
+                        result.error ?: "Kitten TTS initialization failed."
+                    )
                 }
 
-                modelDir = dir
+                val nativeVoices = result.voices
 
                 runOnUiThread {
+                    if (nativeVoices.isNotEmpty()) {
+                        spinner.adapter = ArrayAdapter(
+                            this,
+                            android.R.layout.simple_spinner_dropdown_item,
+                            nativeVoices.toTypedArray()
+                        )
+                    }
+
+                    engineReady = true
+
                     setBusy(
                         false,
-                        "Ready. Enter text and generate a WAV."
+                        "Ready. Enter text and tap Generate WAV."
                     )
                 }
 
             } catch (t: Throwable) {
 
                 runOnUiThread {
+                    engineReady = false
+
                     setBusy(
                         false,
                         "Model initialization failed: ${
-                            t.message ?: t::class.java.simpleName
+                            t.message ?: t.javaClass.simpleName
                         }"
                     )
 
@@ -149,7 +184,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (target.length() < expectedMinBytes) {
+        if (!target.exists() || target.length() < expectedMinBytes) {
             throw IllegalStateException(
                 "Asset appears incomplete: $assetName"
             )
@@ -157,64 +192,88 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun generateSpeech() {
+
+        if (!engineReady) {
+            Toast.makeText(
+                this,
+                "TTS engine is not ready.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
         val text = input.text.toString()
 
         if (text.isBlank()) {
             input.error = "Enter some text first."
+            input.requestFocus()
             return
         }
 
-        val voice = spinner.selectedItem?.toString() ?: "Jasper"
+        val voice =
+            spinner.selectedItem?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?: "Jasper"
 
-        setBusy(true, "Generating speech…")
+        setBusy(
+            true,
+            "Generating speech..."
+        )
 
         executor.execute {
 
-            val temp = File(
+            val outputFile = File(
                 cacheDir,
-                "kitten-${System.currentTimeMillis()}.wav"
+                "kitten_${System.currentTimeMillis()}.wav"
             )
 
             try {
 
-                val error = NativeBridge.synthesize(
-                    text,
-                    voice,
-                    1.0f,
-                    temp.absolutePath
+                val error = KittenNative.synthesize(
+                    text = text,
+                    voice = voice,
+                    speed = 1.0f,
+                    outputPath = outputFile.absolutePath
                 )
 
-                if (error != null) {
+                if (!error.isNullOrBlank()) {
                     throw IllegalStateException(error)
                 }
 
-                val uri = saveToMusic(temp)
+                if (!outputFile.exists() || outputFile.length() < 44L) {
+                    throw IllegalStateException(
+                        "TTS engine did not create a valid WAV file."
+                    )
+                }
 
-                temp.delete()
+                val uri = saveToMusic(outputFile)
+
+                outputFile.delete()
 
                 runOnUiThread {
 
                     setBusy(
                         false,
-                        "Saved to Music/Kitten TTS • $uri"
+                        "Speech generated successfully."
                     )
 
                     Toast.makeText(
                         this,
-                        "WAV saved in Music/Kitten TTS",
+                        "WAV saved to Music/Kitten TTS",
                         Toast.LENGTH_LONG
                     ).show()
                 }
 
             } catch (t: Throwable) {
 
-                temp.delete()
+                outputFile.delete()
 
                 runOnUiThread {
+
                     setBusy(
                         false,
                         "Generation failed: ${
-                            t.message ?: t::class.java.simpleName
+                            t.message ?: t.javaClass.simpleName
                         }"
                     )
                 }
@@ -226,14 +285,14 @@ class MainActivity : AppCompatActivity() {
 
         val resolver = contentResolver
 
-        val name =
+        val fileName =
             "kitten_tts_${System.currentTimeMillis()}.wav"
 
         val values = ContentValues().apply {
 
             put(
                 MediaStore.Audio.Media.DISPLAY_NAME,
-                name
+                fileName
             )
 
             put(
@@ -257,7 +316,7 @@ class MainActivity : AppCompatActivity() {
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             values
         ) ?: throw IllegalStateException(
-            "Could not create Music media entry"
+            "Unable to create Music media entry."
         )
 
         try {
@@ -265,27 +324,27 @@ class MainActivity : AppCompatActivity() {
             resolver.openOutputStream(
                 uri,
                 "w"
-            )!!.use { out ->
+            )!!.use { output ->
 
-                FileInputStream(source).use { inputStream ->
+                FileInputStream(source).use { input ->
 
-                    inputStream.copyTo(
-                        out,
+                    input.copyTo(
+                        output,
                         1024 * 1024
                     )
                 }
             }
 
-            values.clear()
-
-            values.put(
-                MediaStore.Audio.Media.IS_PENDING,
-                0
-            )
+            val completed = ContentValues().apply {
+                put(
+                    MediaStore.Audio.Media.IS_PENDING,
+                    0
+                )
+            }
 
             resolver.update(
                 uri,
-                values,
+                completed,
                 null,
                 null
             )
@@ -308,25 +367,31 @@ class MainActivity : AppCompatActivity() {
         busy: Boolean,
         message: String
     ) {
+
         progress.visibility =
             if (busy) View.VISIBLE else View.GONE
 
-        generate.isEnabled = !busy
-        clear.isEnabled = !busy
-        spinner.isEnabled = !busy
+        generate.isEnabled =
+            !busy && engineReady
+
+        clear.isEnabled =
+            !busy
+
+        spinner.isEnabled =
+            !busy
 
         status.text = message
     }
 
     override fun onDestroy() {
 
-        super.onDestroy()
+        try {
+            KittenNative.release()
+        } catch (_: Throwable) {
+        }
 
         executor.shutdownNow()
 
-        try {
-            NativeBridge.release()
-        } catch (_: Throwable) {
-        }
+        super.onDestroy()
     }
 }
