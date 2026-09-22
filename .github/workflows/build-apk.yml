@@ -59,19 +59,23 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
-          AAPT2="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/aapt2"
-          D8="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/d8"
-          ZIPALIGN="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/zipalign"
-          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
+          SDK="${ANDROID_SDK_ROOT}"
+          BT="${SDK}/build-tools/${BUILD_TOOLS}"
 
-          test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_API}"
-          test -d "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}"
-          test -d "${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
+          test -d "${SDK}/platforms/android-${ANDROID_API}"
+          test -d "${BT"
+          test -d "${SDK}/ndk/${NDK_VERSION}"
 
-          "${AAPT2}" version
-          "${D8}" --version
-          "${ZIPALIGN}" 2>&1 | head -n 2
-          "${APKSIGNER}" --version
+          test -x "${BT}/aapt2"
+          test -x "${BT}/d8"
+          test -x "${BT}/zipalign"
+          test -x "${BT}/apksigner"
+
+          "${BT}/aapt2" version
+          "${BT}/d8" --version
+          "${BT}/apksigner" --version
+
+          echo "Android SDK verification successful."
 
       - name: Install Gradle
         shell: bash
@@ -134,6 +138,7 @@ jobs:
             "${BASE_URL}/voices.npz" \
             -o "${MODEL_DIR}/voices.npz"
 
+          echo "Downloaded Kitten TTS files:"
           ls -lh "${MODEL_DIR}"
 
       - name: Verify Kitten TTS model
@@ -151,20 +156,25 @@ jobs:
           import json
           import os
 
-          model_dir = "app/src/main/assets/model"
+          path = "app/src/main/assets/model/config.json"
 
-          with open(
-              os.path.join(model_dir, "config.json"),
-              "r",
-              encoding="utf-8"
-          ) as f:
-              config = json.load(f)
+          with open(path, "r", encoding="utf-8") as f:
+              data = json.load(f)
 
           print("config.json loaded successfully")
-          print("Top-level keys:")
-          for key in config:
-              print(" -", key)
+          print("Top-level keys:", list(data.keys()))
           PY
+
+      - name: Check Android project
+        shell: bash
+        run: |
+          set -e
+
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+
+          echo "Android project files found."
 
       - name: Build release APK
         shell: bash
@@ -177,25 +187,79 @@ jobs:
             clean \
             assembleRelease
 
-      - name: Verify release APK
+      - name: Verify APK exists
         shell: bash
         run: |
           set -e
 
-          APK="app/build/outputs/apk/release/app-release.apk"
+          APK_DIR="app/build/outputs/apk/release"
 
+          test -d "${APK_DIR}"
+
+          APK="$(find "${APK_DIR}" -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+
+          test -n "${APK}"
           test -s "${APK}"
 
-          echo "APK:"
+          echo "Release APK:"
           ls -lh "${APK}"
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find app/build/outputs/apk/release \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' | head -n 1)"
+
+          test -n "${APK}"
 
           "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" verify \
             --verbose \
             "${APK}"
 
+      - name: Check APK alignment
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find app/build/outputs/apk/release \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' | head -n 1)"
+
+          test -n "${APK}"
+
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/zipalign" \
+            -c \
+            -P 16 \
+            -v \
+            4 \
+            "${APK}"
+
+      - name: Rename final APK
+        shell: bash
+        run: |
+          set -e
+
+          APK="$(find app/build/outputs/apk/release \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' | head -n 1)"
+
+          test -n "${APK}"
+
+          cp "${APK}" \
+            "app/build/outputs/apk/release/KittenTTS-Release.apk"
+
+          ls -lh \
+            "app/build/outputs/apk/release/KittenTTS-Release.apk"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: KittenTTS-Android-Release
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/KittenTTS-Release.apk
           if-no-files-found: error
