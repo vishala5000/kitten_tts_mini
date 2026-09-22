@@ -4,33 +4,31 @@ plugins {
 }
 
 android {
-    namespace = "com.vishala.kittentts"
-
+    namespace = "com.vishala.kittentts" // Keep your actual namespace
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.vishala.kittentts"
-
-        minSdk = 23
+        applicationId = "com.vishala.kittentts" // Keep your actual applicationId
+        minSdk = 24
         targetSdk = 36
-
         versionCode = 1
         versionName = "1.0"
 
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Ensure NDK is configured if your project requires specific ABIs
         ndk {
-            abiFilters += "arm64-v8a"
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
     }
 
     buildTypes {
-
         release {
             isMinifyEnabled = false
-            isShrinkResources = false
-        }
-
-        debug {
-            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 
@@ -39,44 +37,23 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlin {
-        compilerOptions {
-            jvmTarget.set(
-                org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
-            )
-        }
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-    }
-
-    sourceSets {
-        getByName("main") {
-            assets.srcDir(
-                "src/main/assets"
-            )
-
-            jniLibs.srcDir(
-                "src/main/jniLibs"
-            )
-        }
+    // =====================================================================
+    // 👇 CRITICAL FIX: Prevents Android from compressing the 74MB AI model 👇
+    // =====================================================================
+    androidResources {
+        noCompress += listOf("onnx", "npz", "json", "tflite")
     }
 }
 
 dependencies {
-
-    implementation(
-        "androidx.core:core-ktx:1.17.0"
-    )
-
-    implementation(
-        "androidx.appcompat:appcompat:1.7.1"
-    )
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+    
+    // Add any other dependencies your project already has here
 }
