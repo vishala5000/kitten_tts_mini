@@ -63,7 +63,7 @@ jobs:
           BT="${SDK}/build-tools/${BUILD_TOOLS}"
 
           test -d "${SDK}/platforms/android-${ANDROID_API}"
-          test -d "${BT"
+          test -d "${BT}"
           test -d "${SDK}/ndk/${NDK_VERSION}"
 
           test -x "${BT}/aapt2"
@@ -82,7 +82,7 @@ jobs:
         run: |
           set -e
 
-          mkdir -p "$HOME/gradle"
+          mkdir -p "${HOME}/gradle"
 
           curl -fL \
             --retry 5 \
@@ -90,13 +90,13 @@ jobs:
             --connect-timeout 30 \
             --max-time 600 \
             "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-            -o "$HOME/gradle/gradle.zip"
+            -o "${HOME}/gradle/gradle.zip"
 
           unzip -q \
-            "$HOME/gradle/gradle.zip" \
-            -d "$HOME/gradle"
+            "${HOME}/gradle/gradle.zip" \
+            -d "${HOME}/gradle"
 
-          echo "$HOME/gradle/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+          echo "${HOME}/gradle/gradle-${GRADLE_VERSION}/bin" >> "${GITHUB_PATH}"
 
       - name: Verify Gradle
         shell: bash
@@ -132,13 +132,13 @@ jobs:
 
           curl -fL \
             --retry 5 \
-            --retry-delay 3 \
+            --delay 3 \
             --connect-timeout 30 \
             --max-time 1800 \
             "${BASE_URL}/voices.npz" \
             -o "${MODEL_DIR}/voices.npz"
 
-          echo "Downloaded Kitten TTS files:"
+          echo "Downloaded model files:"
           ls -lh "${MODEL_DIR}"
 
       - name: Verify Kitten TTS model
@@ -154,7 +154,6 @@ jobs:
 
           python3 - <<'PY'
           import json
-          import os
 
           path = "app/src/main/assets/model/config.json"
 
@@ -170,9 +169,9 @@ jobs:
         run: |
           set -e
 
-          test -f settings.gradle.kts
-          test -f build.gradle.kts
-          test -f app/build.gradle.kts
+          test -f "settings.gradle.kts"
+          test -f "build.gradle.kts"
+          test -f "app/build.gradle.kts"
 
           echo "Android project files found."
 
@@ -187,7 +186,7 @@ jobs:
             clean \
             assembleRelease
 
-      - name: Verify APK exists
+      - name: Locate APK
         shell: bash
         run: |
           set -e
@@ -196,27 +195,29 @@ jobs:
 
           test -d "${APK_DIR}"
 
-          APK="$(find "${APK_DIR}" -maxdepth 1 -type f -name '*.apk' | head -n 1)"
-
-          test -n "${APK}"
-          test -s "${APK}"
-
-          echo "Release APK:"
-          ls -lh "${APK}"
+          find "${APK_DIR}" \
+            -maxdepth 1 \
+            -type f \
+            -name "*.apk" \
+            -print
 
       - name: Verify APK signature
         shell: bash
         run: |
           set -e
 
-          APK="$(find app/build/outputs/apk/release \
+          APK="$(find \
+            app/build/outputs/apk/release \
             -maxdepth 1 \
             -type f \
-            -name '*.apk' | head -n 1)"
+            -name "*.apk" \
+            | head -n 1)"
 
           test -n "${APK}"
+          test -s "${APK}"
 
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" verify \
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" \
+            verify \
             --verbose \
             "${APK}"
 
@@ -225,10 +226,12 @@ jobs:
         run: |
           set -e
 
-          APK="$(find app/build/outputs/apk/release \
+          APK="$(find \
+            app/build/outputs/apk/release \
             -maxdepth 1 \
             -type f \
-            -name '*.apk' | head -n 1)"
+            -name "*.apk" \
+            | head -n 1)"
 
           test -n "${APK}"
 
@@ -244,10 +247,12 @@ jobs:
         run: |
           set -e
 
-          APK="$(find app/build/outputs/apk/release \
+          APK="$(find \
+            app/build/outputs/apk/release \
             -maxdepth 1 \
             -type f \
-            -name '*.apk' | head -n 1)"
+            -name "*.apk" \
+            | head -n 1)"
 
           test -n "${APK}"
 
