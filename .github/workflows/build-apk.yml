@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     env:
-      ANDROID_API: "35"
+      ANDROID_API: "36"
       BUILD_TOOLS: "35.0.0"
       NDK_VERSION: "28.1.13356709"
       GRADLE_VERSION: "8.13"
@@ -40,7 +40,7 @@ jobs:
           set -e
           yes | sdkmanager --licenses >/dev/null || true
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK
         shell: bash
         run: |
           set -e
@@ -138,10 +138,10 @@ jobs:
             "${BASE_URL}/voices.npz" \
             -o "${MODEL_DIR}/voices.npz"
 
-          echo "Downloaded model files:"
+          echo "Kitten TTS model files:"
           ls -lh "${MODEL_DIR}"
 
-      - name: Verify Kitten TTS model
+      - name: Verify Kitten TTS files
         shell: bash
         run: |
           set -e
@@ -158,22 +158,11 @@ jobs:
           path = "app/src/main/assets/model/config.json"
 
           with open(path, "r", encoding="utf-8") as f:
-              data = json.load(f)
+              config = json.load(f)
 
-          print("config.json loaded successfully")
-          print("Top-level keys:", list(data.keys()))
+          print("config.json OK")
+          print("Keys:", list(config.keys()))
           PY
-
-      - name: Check Android project
-        shell: bash
-        run: |
-          set -e
-
-          test -f "settings.gradle.kts"
-          test -f "build.gradle.kts"
-          test -f "app/build.gradle.kts"
-
-          echo "Android project files found."
 
       - name: Build release APK
         shell: bash
@@ -186,28 +175,17 @@ jobs:
             clean \
             assembleRelease
 
-      - name: Locate APK
+      - name: Find APK
         shell: bash
         run: |
           set -e
 
-          APK_DIR="app/build/outputs/apk/release"
-
-          test -d "${APK_DIR}"
-
-          APK="$(find "${APK_DIR}" \
-            -maxdepth 1 \
+          find app/build/outputs/apk/release \
             -type f \
             -name "*.apk" \
-            | head -n 1)"
+            -print
 
-          test -n "${APK}"
-          test -s "${APK}"
-
-          echo "APK=${APK}"
-          ls -lh "${APK}"
-
-      - name: Verify APK signature
+      - name: Verify APK
         shell: bash
         run: |
           set -e
@@ -220,6 +198,10 @@ jobs:
             | head -n 1)"
 
           test -n "${APK}"
+          test -s "${APK}"
+
+          echo "APK: ${APK}"
+          ls -lh "${APK}"
 
           "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" \
             verify \
@@ -247,7 +229,7 @@ jobs:
             4 \
             "${APK}"
 
-      - name: Rename final APK
+      - name: Create final APK
         shell: bash
         run: |
           set -e
