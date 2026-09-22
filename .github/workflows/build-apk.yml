@@ -1,4 +1,4 @@
-name: Build & Sign Kitten TTS Mini APK
+name: Build Kitten TTS Mini APK
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ env:
 
 jobs:
   build:
-    name: Build and Sign Release APK
+    name: Build APK
     runs-on: ubuntu-24.04
 
     steps:
@@ -58,7 +58,7 @@ jobs:
           curl -L -o app/src/main/assets/model/kitten_tts_mini_v0_8.onnx "$BASE_URL/kitten_tts_mini_v0_8.onnx"
           curl -L -o app/src/main/assets/model/voices.npz "$BASE_URL/voices.npz"
           
-          echo "Verifying downloaded files (Safety Check)..."
+          echo "Verifying downloaded files..."
           ONNX_SIZE=$(stat -c%s "app/src/main/assets/model/kitten_tts_mini_v0_8.onnx")
           if [ "$ONNX_SIZE" -lt 1000000 ]; then
             echo "ERROR: The ONNX model is too small ($ONNX_SIZE bytes). Download failed!"
@@ -71,66 +71,9 @@ jobs:
       - name: Build Release APK
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Locate unsigned APK
-        id: apk
-        run: |
-          set -e
-          APK="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name "*.apk" | head -n 1)"
-          test -n "${APK}"
-          echo "Found unsigned APK: ${APK}"
-          echo "apk=${APK}" >> "${GITHUB_OUTPUT}"
-
-      - name: Generate release signing key
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KITTEN_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KITTEN_KEY_PASSWORD }}
-        run: |
-          set -e
-          if [ -z "${KEYSTORE_PASSWORD}" ] || [ -z "${KEY_PASSWORD}" ]; then
-            echo "ERROR: Secrets KITTEN_KEYSTORE_PASSWORD and KITTEN_KEY_PASSWORD are required."
-            exit 1
-          fi
-          keytool -genkeypair -v -keystore kitten-release.jks -alias kitten -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass "${KEYSTORE_PASSWORD}" -keypass "${KEY_PASSWORD}" \
-            -dname "CN=Kitten TTS, OU=Android, O=Vishala, L=India, ST=Karnataka, C=IN"
-
-      - name: Sign APK
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KITTEN_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KITTEN_KEY_PASSWORD }}
-        run: |
-          set -e
-          UNSIGNED="${{ steps.apk.outputs.apk }}"
-          SIGNED="app/build/outputs/apk/release/Kitten-TTS-Mini-release-signed.apk"
-          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
-          
-          "${APKSIGNER}" sign \
-            --ks kitten-release.jks \
-            --ks-key-alias kitten \
-            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
-            --key-pass "pass:${KEY_PASSWORD}" \
-            --out "${SIGNED}" \
-            "${UNSIGNED}"
-          
-          echo "Signed APK:"
-          ls -lh "${SIGNED}"
-
-      - name: Verify signed APK
-        run: |
-          set -e
-          APK="app/build/outputs/apk/release/Kitten-TTS-Mini-release-signed.apk"
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" verify --verbose "${APK}"
-          echo "=========================================="
-          echo "SIGNED APK VERIFIED SUCCESSFULLY"
-          echo "=========================================="
-
-      - name: Upload Signed APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kitten-TTS-Mini-release-signed-apk
-          path: app/build/outputs/apk/release/Kitten-TTS-Mini-release-signed.apk
+          name: Kitten-TTS-Mini-release-apk
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
           if-no-files-found: error
-
-      - name: Cleanup signing material
-        if: always()
-        run: rm -f kitten-release.jks
