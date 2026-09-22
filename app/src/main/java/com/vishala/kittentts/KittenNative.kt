@@ -11,7 +11,8 @@ object KittenNative {
     private var loaded = false
 
     init {
-        System.loadLibrary("kittentts_jni")
+        // FIXED: Changed from "kittentts_jni" to "kitten_jni" to match the actual .so file name
+        System.loadLibrary("kitten_jni")
     }
 
     fun initialize(
