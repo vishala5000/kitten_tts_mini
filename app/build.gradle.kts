@@ -36,15 +36,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    // Modern Kotlin DSL syntax (replaces deprecated kotlinOptions)
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 
-    // CRITICAL FIX: Prevents compression of large AI model files
-    aaptOptions {
-        noCompress 'onnx', 'npz', 'json', 'tflite'
-    }
-    
+    // =====================================================================
+    // CRITICAL FIX: Pure Kotlin DSL syntax to prevent compression of AI models
+    // =====================================================================
     androidResources {
         noCompress += listOf("onnx", "npz", "json", "tflite")
     }
