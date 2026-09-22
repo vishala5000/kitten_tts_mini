@@ -9,6 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.vishala.kittentts"
+
         minSdk = 23
         targetSdk = 36
 
