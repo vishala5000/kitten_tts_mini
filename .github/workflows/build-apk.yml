@@ -56,11 +56,11 @@ jobs:
         run: |
           set -e
 
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
-
           SDK="${ANDROID_SDK_ROOT}"
           BT="${SDK}/build-tools/${BUILD_TOOLS}"
+
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
           test -d "${SDK}/platforms/android-${ANDROID_API}"
           test -d "${BT}"
@@ -132,7 +132,7 @@ jobs:
 
           curl -fL \
             --retry 5 \
-            --delay 3 \
+            --retry-delay 3 \
             --connect-timeout 30 \
             --max-time 1800 \
             "${BASE_URL}/voices.npz" \
@@ -195,11 +195,17 @@ jobs:
 
           test -d "${APK_DIR}"
 
-          find "${APK_DIR}" \
+          APK="$(find "${APK_DIR}" \
             -maxdepth 1 \
             -type f \
             -name "*.apk" \
-            -print
+            | head -n 1)"
+
+          test -n "${APK}"
+          test -s "${APK}"
+
+          echo "APK=${APK}"
+          ls -lh "${APK}"
 
       - name: Verify APK signature
         shell: bash
@@ -214,7 +220,6 @@ jobs:
             | head -n 1)"
 
           test -n "${APK}"
-          test -s "${APK}"
 
           "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" \
             verify \
