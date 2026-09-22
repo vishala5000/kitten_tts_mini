@@ -17,6 +17,7 @@ jobs:
       ANDROID_API: "35"
       BUILD_TOOLS: "35.0.0"
       NDK_VERSION: "28.1.13356709"
+      GRADLE_VERSION: "8.13"
 
     steps:
       - name: Checkout
@@ -27,12 +28,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
 
-      # IMPORTANT:
-      # Do NOT use packages: tools
-      # "tools" is obsolete and causes:
-      # Warning: Failed to find package 'tools'
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
@@ -42,10 +38,9 @@ jobs:
         shell: bash
         run: |
           set -e
-
           yes | sdkmanager --licenses >/dev/null || true
 
-      - name: Install required Android packages
+      - name: Install Android SDK packages
         shell: bash
         run: |
           set -e
@@ -61,36 +56,42 @@ jobs:
         run: |
           set -e
 
-          echo "=========================================="
-          echo "ANDROID SDK"
-          echo "=========================================="
-
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
-
-          echo
-          echo "Installed packages:"
-          sdkmanager --list_installed
-
-          echo
-          echo "Checking required packages..."
 
           test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_API}"
           test -d "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}"
           test -d "${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
 
-          echo
-          echo "Required Android SDK packages are installed."
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/aapt2" version
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/d8" --version
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/zipalign" --help >/dev/null
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" --version
 
-      - name: Make Gradle executable
+      - name: Install Gradle
         shell: bash
         run: |
-          chmod +x ./gradlew
+          set -e
+
+          mkdir -p "$HOME/gradle"
+
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+            -o "$HOME/gradle/gradle.zip"
+
+          unzip -q \
+            "$HOME/gradle/gradle.zip" \
+            -d "$HOME/gradle"
+
+          echo "$HOME/gradle/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
 
       - name: Verify Gradle
         shell: bash
         run: |
-          ./gradlew --version
+          set -e
+          gradle --version
 
       - name: Download Kitten TTS model
         shell: bash
@@ -100,8 +101,6 @@ jobs:
           mkdir -p app/src/main/assets/model
 
           BASE_URL="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
-
-          echo "Downloading Kitten TTS model..."
 
           curl -fL \
             --retry 5 \
@@ -127,11 +126,10 @@ jobs:
             "${BASE_URL}/voices.npz" \
             -o app/src/main/assets/model/voices.npz
 
-          echo
-          echo "Downloaded model files:"
+          echo "Downloaded files:"
           ls -lh app/src/main/assets/model
 
-      - name: Verify model files
+      - name: Verify Kitten TTS model
         shell: bash
         run: |
           set -e
@@ -141,15 +139,6 @@ jobs:
           test -s "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
           test -s "${MODEL_DIR}/config.json"
           test -s "${MODEL_DIR}/voices.npz"
-
-          echo "ONNX:"
-          ls -lh "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
-
-          echo "Config:"
-          ls -lh "${MODEL_DIR}/config.json"
-
-          echo "Voices:"
-          ls -lh "${MODEL_DIR}/voices.npz"
 
           python3 - <<'PY'
           import json
@@ -168,7 +157,7 @@ jobs:
         run: |
           set -e
 
-          ./gradlew \
+          gradle \
             --no-daemon \
             --stacktrace \
             clean \
@@ -178,10 +167,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          echo "=========================================="
-          echo "GENERATED APK"
-          echo "=========================================="
 
           find app/build/outputs/apk \
             -type f \
