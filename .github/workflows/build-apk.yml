@@ -1,4 +1,4 @@
-name: Build Kitten TTS Android APK
+name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -6,189 +6,47 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-
-env:
-  ANDROID_API: "36"
-  BUILD_TOOLS: "35.0.0"
-  NDK_VERSION: "28.1.13356709"
-  GRADLE_VERSION: "8.13"
-
 jobs:
   build:
-    # Changed from ubuntu-latest to ubuntu-24.04 to prevent unexpected breakage 
-    # when ubuntu-latest migrates to Ubuntu 26.04 in October 2026.
+    name: Build Debug APK
+    # Pinned to 24.04 to avoid the "ubuntu-latest migrating to Ubuntu 26" notice
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout
-        # v4 is the current stable major version. (The Node.js 20 warning for this 
-        # specific action is a known GitHub runner transition notice and is safe to ignore 
-        # as long as you are on the latest v4 patch).
+      - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
-        # Updated from v4 to v6. v4 is officially deprecated, and v6 natively supports 
-        # the newer Node.js runtime, resolving the deprecation warning.
+      - name: Set up JDK 17
+        # Updated from v4 to v6 to clear the official deprecation warning
         uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Android SDK
-        # Updated from v3 to v4. v4 is the latest stable release and resolves the 
-        # Node.js 20 deprecation warning.
-        uses: android-actions/setup-android@v4
+      - name: Set up Gradle 9.5.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
 
-      - name: Install Android SDK components
+      - name: Show Java version
+        run: java -version
+
+      - name: Show Gradle version
+        run: gradle --version
+
+      - name: Build Android APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK
         run: |
-          set -e
-
-          yes | sdkmanager --licenses >/dev/null || true
-
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-${ANDROID_API}" \
-            "build-tools;${BUILD_TOOLS}" \
-            "ndk;${NDK_VERSION}"
-
-      - name: Verify Android SDK
-        run: |
-          set -e
-
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
-
-          test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_API}"
-          test -d "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}"
-          test -d "${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
-
-      - name: Make Gradle executable
-        run: |
-          chmod +x ./gradlew
-
-      - name: Clean
-        run: |
-          ./gradlew clean --no-daemon
-
-      - name: Build release APK
-        run: |
-          set -e
-
-          ./gradlew \
-            :app:assembleRelease \
-            --no-daemon \
-            --stacktrace
-
-      - name: Locate unsigned APK
-        id: apk
-        run: |
-          set -e
-
-          APK="$(find \
-            app/build/outputs/apk/release \
-            -maxdepth 1 \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)"
-
-          test -n "${APK}"
-          test -s "${APK}"
-
-          echo "Unsigned APK:"
-          ls -lh "${APK}"
-
-          echo "apk=${APK}" >> "${GITHUB_OUTPUT}"
-
-      - name: Generate release signing key
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KITTEN_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KITTEN_KEY_PASSWORD }}
-        run: |
-          set -e
-
-          if [ -z "${KEYSTORE_PASSWORD}" ]; then
-            echo "KITTEN_KEYSTORE_PASSWORD secret is required."
-            exit 1
-          fi
-
-          if [ -z "${KEY_PASSWORD}" ]; then
-            echo "KITTEN_KEY_PASSWORD secret is required."
-            exit 1
-          fi
-
-          keytool \
-            -genkeypair \
-            -v \
-            -keystore kitten-release.jks \
-            -alias kitten \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass "${KEYSTORE_PASSWORD}" \
-            -keypass "${KEY_PASSWORD}" \
-            -dname "CN=Kitten TTS, OU=Android, O=Vishala, L=India, ST=Karnataka, C=IN"
-
-          test -s kitten-release.jks
-
-      - name: Sign APK
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KITTEN_KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KITTEN_KEY_PASSWORD }}
-        run: |
-          set -e
-
-          UNSIGNED="${{ steps.apk.outputs.apk }}"
-          SIGNED="app/build/outputs/apk/release/Kitten-TTS-release.apk"
-
-          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
-
-          test -x "${APKSIGNER}"
-          test -s "${UNSIGNED}"
-          test -s kitten-release.jks
-
-          "${APKSIGNER}" sign \
-            --ks kitten-release.jks \
-            --ks-key-alias kitten \
-            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
-            --key-pass "pass:${KEY_PASSWORD}" \
-            --out "${SIGNED}" \
-            "${UNSIGNED}"
-
-          test -s "${SIGNED}"
-
-          echo "Signed APK:"
-          ls -lh "${SIGNED}"
-
-      - name: Verify signed APK
-        run: |
-          set -e
-
-          APK="app/build/outputs/apk/release/Kitten-TTS-release.apk"
-
-          test -s "${APK}"
-
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" \
-            verify \
-            --verbose \
-            "${APK}"
-
-          echo "=========================================="
-          echo "SIGNED APK VERIFIED SUCCESSFULLY"
-          echo "=========================================="
-
-          ls -lh "${APK}"
+          echo "Checking generated APK..."
+          ls -lh app/build/outputs/apk/debug/
+          test -f app/build/outputs/apk/debug/app-debug.apk
+          echo "APK successfully generated."
 
       - name: Upload APK
-        # v4 is already the latest and fully supported.
         uses: actions/upload-artifact@v4
         with:
-          name: Kitten-TTS-Android
-          path: app/build/outputs/apk/release/Kitten-TTS-release.apk
+          name: BibleTitleGenerator-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-
-      - name: Cleanup signing material
-        if: always()
-        run: |
-          rm -f kitten-release.jks
