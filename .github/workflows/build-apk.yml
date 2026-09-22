@@ -1,79 +1,58 @@
-name: Build Kitten TTS Mini APK
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
+android {
+    namespace = "com.vishala.kittentts"
+    compileSdk = 36
 
-env:
-  ANDROID_API: "36"
-  BUILD_TOOLS: "35.0.0"
-  NDK_VERSION: "28.1.13356709"
-  GRADLE_VERSION: "8.13"
+    defaultConfig {
+        applicationId = "com.vishala.kittentts"
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0"
 
-jobs:
-  build:
-    name: Build APK
-    runs-on: ubuntu-24.04
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
+    }
 
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: '17'
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
 
-      - name: Set up Android SDK & NDK
-        uses: android-actions/setup-android@v4
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 
-      - name: Install Android SDK components
-        run: |
-          set -e
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-${ANDROID_API}" \
-            "build-tools;${BUILD_TOOLS}" \
-            "ndk;${NDK_VERSION}"
+    // CRITICAL: Multiple ways to ensure no compression
+    aaptOptions {
+        noCompress 'onnx', 'npz', 'json', 'tflite'
+    }
+    
+    androidResources {
+        noCompress += listOf("onnx", "npz", "json", "tflite")
+    }
+}
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: ${{ env.GRADLE_VERSION }}
-
-      - name: Download TTS Models from Release
-        run: |
-          set -e
-          echo "Creating assets/model directory..."
-          mkdir -p app/src/main/assets/model
-          
-          BASE_URL="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
-          
-          echo "Downloading model files..."
-          curl -L -o app/src/main/assets/model/config.json "$BASE_URL/config.json"
-          curl -L -o app/src/main/assets/model/kitten_tts_mini_v0_8.onnx "$BASE_URL/kitten_tts_mini_v0_8.onnx"
-          curl -L -o app/src/main/assets/model/voices.npz "$BASE_URL/voices.npz"
-          
-          echo "Verifying downloaded files..."
-          ONNX_SIZE=$(stat -c%s "app/src/main/assets/model/kitten_tts_mini_v0_8.onnx")
-          if [ "$ONNX_SIZE" -lt 1000000 ]; then
-            echo "ERROR: The ONNX model is too small ($ONNX_SIZE bytes). Download failed!"
-            exit 1
-          fi
-          
-          echo "Models downloaded successfully!"
-          ls -lh app/src/main/assets/model/
-
-      - name: Build Release APK
-        run: gradle assembleRelease --no-daemon --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kitten-TTS-Mini-release-apk
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-          if-no-files-found: error
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+}
