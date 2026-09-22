@@ -3,15 +3,20 @@ name: Build Kitten TTS Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    runs-on: ubuntu-22.04
+
+    env:
+      ANDROID_API: "35"
+      BUILD_TOOLS: "35.0.0"
+      NDK_VERSION: "28.1.13356709"
 
     steps:
       - name: Checkout
@@ -26,65 +31,96 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973"
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Download model release assets
+      - name: Accept Android SDK licenses
         shell: bash
         run: |
-          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+
+      - name: Install required Android packages
+        shell: bash
+        run: |
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API}" \
+            "build-tools;${BUILD_TOOLS}" \
+            "ndk;${NDK_VERSION}"
+
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          sdkmanager --list_installed | grep -E \
+            "platform-tools|platforms;android-${ANDROID_API}|build-tools;${BUILD_TOOLS}|ndk;${NDK_VERSION}" \
+            || true
+
+      - name: Make Gradle executable
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+
+      - name: Download Kitten TTS model
+        shell: bash
+        run: |
+          set -e
+
           mkdir -p app/src/main/assets/model
-          base="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
-          curl -fL --retry 5 --retry-all-errors "$base/kitten_tts_mini_v0_8.onnx" -o app/src/main/assets/model/kitten_tts_mini_v0_8.onnx
-          curl -fL --retry 5 --retry-all-errors "$base/config.json" -o app/src/main/assets/model/config.json
-          curl -fL --retry 5 --retry-all-errors "$base/voices.npz" -o app/src/main/assets/model/voices.npz
+
+          BASE_URL="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
+
+          curl -fL --retry 5 --retry-delay 3 \
+            "${BASE_URL}/kitten_tts_mini_v0_8.onnx" \
+            -o app/src/main/assets/model/kitten_tts_mini_v0_8.onnx
+
+          curl -fL --retry 5 --retry-delay 3 \
+            "${BASE_URL}/config.json" \
+            -o app/src/main/assets/model/config.json
+
+          curl -fL --retry 5 --retry-delay 3 \
+            "${BASE_URL}/voices.npz" \
+            -o app/src/main/assets/model/voices.npz
+
+          echo "Downloaded model files:"
+          ls -lh app/src/main/assets/model
+
+      - name: Verify model files
+        shell: bash
+        run: |
+          set -e
+
           test -s app/src/main/assets/model/kitten_tts_mini_v0_8.onnx
           test -s app/src/main/assets/model/config.json
           test -s app/src/main/assets/model/voices.npz
 
-      - name: Build native Rust engine
-        shell: bash
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
-        run: |
-          set -euo pipefail
-          export ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/27.0.12077973"
-          cd native
-          cargo build --release --target aarch64-linux-android
-          cd ..
-          mkdir -p app/src/main/jniLibs/arm64-v8a
-          cp native/target/aarch64-linux-android/release/libkitten_android.so app/src/main/jniLibs/arm64-v8a/
-          find native/target/aarch64-linux-android/release -name 'libonnxruntime.so' -exec cp {} app/src/main/jniLibs/arm64-v8a/ \; || true
-          if [ ! -f app/src/main/jniLibs/arm64-v8a/libonnxruntime.so ]; then
-            find "$HOME/.cargo" -name 'libonnxruntime.so' -exec cp {} app/src/main/jniLibs/arm64-v8a/ \; || true
-          fi
-          test -f app/src/main/jniLibs/arm64-v8a/libkitten_android.so
-          test -f app/src/main/jniLibs/arm64-v8a/libonnxruntime.so
+          python3 - <<'PY'
+          import json
 
-      - name: Download Gradle
-        run: |
-          curl -fL --retry 5 --retry-all-errors             https://services.gradle.org/distributions/gradle-8.13-bin.zip             -o /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-8.13/bin" >> "$GITHUB_PATH"
+          path = "app/src/main/assets/model/config.json"
+
+          with open(path, "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          print("config.json loaded successfully")
+          print("Top-level keys:", list(data.keys()))
+          PY
 
       - name: Build release APK
-        run: gradle --no-daemon --stacktrace assembleRelease
-
-      - name: Verify APK
+        shell: bash
         run: |
-          test -s app/build/outputs/apk/release/app-release.apk
-          mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/KittenTTS-release-unsigned.apk
+          ./gradlew \
+            --no-daemon \
+            --stacktrace \
+            clean \
+            assembleRelease
 
-      - name: Upload APK artifact
+      - name: Locate APK
+        shell: bash
+        run: |
+          find app/build/outputs/apk -type f -name "*.apk" -print
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: KittenTTS-Android
-          path: dist/KittenTTS-release-unsigned.apk
+          name: KittenTTS-Android-Release
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
