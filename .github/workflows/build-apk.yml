@@ -59,14 +59,19 @@ jobs:
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
+          AAPT2="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/aapt2"
+          D8="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/d8"
+          ZIPALIGN="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/zipalign"
+          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
+
           test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_API}"
           test -d "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}"
           test -d "${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
 
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/aapt2" version
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/d8" --version
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/zipalign" --help >/dev/null
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" --version
+          "${AAPT2}" version
+          "${D8}" --version
+          "${ZIPALIGN}" 2>&1 | head -n 2
+          "${APKSIGNER}" --version
 
       - name: Install Gradle
         shell: bash
@@ -78,6 +83,8 @@ jobs:
           curl -fL \
             --retry 5 \
             --retry-delay 3 \
+            --connect-timeout 30 \
+            --max-time 600 \
             "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
             -o "$HOME/gradle/gradle.zip"
 
@@ -98,9 +105,10 @@ jobs:
         run: |
           set -e
 
-          mkdir -p app/src/main/assets/model
-
+          MODEL_DIR="app/src/main/assets/model"
           BASE_URL="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
+
+          mkdir -p "${MODEL_DIR}"
 
           curl -fL \
             --retry 5 \
@@ -108,7 +116,7 @@ jobs:
             --connect-timeout 30 \
             --max-time 1800 \
             "${BASE_URL}/kitten_tts_mini_v0_8.onnx" \
-            -o app/src/main/assets/model/kitten_tts_mini_v0_8.onnx
+            -o "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
 
           curl -fL \
             --retry 5 \
@@ -116,7 +124,7 @@ jobs:
             --connect-timeout 30 \
             --max-time 300 \
             "${BASE_URL}/config.json" \
-            -o app/src/main/assets/model/config.json
+            -o "${MODEL_DIR}/config.json"
 
           curl -fL \
             --retry 5 \
@@ -124,10 +132,9 @@ jobs:
             --connect-timeout 30 \
             --max-time 1800 \
             "${BASE_URL}/voices.npz" \
-            -o app/src/main/assets/model/voices.npz
+            -o "${MODEL_DIR}/voices.npz"
 
-          echo "Downloaded files:"
-          ls -lh app/src/main/assets/model
+          ls -lh "${MODEL_DIR}"
 
       - name: Verify Kitten TTS model
         shell: bash
@@ -142,14 +149,21 @@ jobs:
 
           python3 - <<'PY'
           import json
+          import os
 
-          path = "app/src/main/assets/model/config.json"
+          model_dir = "app/src/main/assets/model"
 
-          with open(path, "r", encoding="utf-8") as f:
-              data = json.load(f)
+          with open(
+              os.path.join(model_dir, "config.json"),
+              "r",
+              encoding="utf-8"
+          ) as f:
+              config = json.load(f)
 
           print("config.json loaded successfully")
-          print("Top-level keys:", list(data.keys()))
+          print("Top-level keys:")
+          for key in config:
+              print(" -", key)
           PY
 
       - name: Build release APK
@@ -163,16 +177,21 @@ jobs:
             clean \
             assembleRelease
 
-      - name: Locate APK
+      - name: Verify release APK
         shell: bash
         run: |
           set -e
 
-          find app/build/outputs/apk \
-            -type f \
-            -name "*.apk" \
-            -print \
-            -exec ls -lh {} \;
+          APK="app/build/outputs/apk/release/app-release.apk"
+
+          test -s "${APK}"
+
+          echo "APK:"
+          ls -lh "${APK}"
+
+          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" verify \
+            --verbose \
+            "${APK}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
