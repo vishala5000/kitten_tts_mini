@@ -40,10 +40,11 @@ android {
         jvmTarget = "17"
     }
 
-    // =====================================================================
-    // CRITICAL FIX: Prevents Android from compressing the 74MB AI model
-    // Without this, the app will crash when trying to load the ONNX file
-    // =====================================================================
+    // CRITICAL FIX: Prevents compression of large AI model files
+    aaptOptions {
+        noCompress 'onnx', 'npz', 'json', 'tflite'
+    }
+    
     androidResources {
         noCompress += listOf("onnx", "npz", "json", "tflite")
     }
