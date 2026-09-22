@@ -17,20 +17,29 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Changed from ubuntu-latest to ubuntu-24.04 to prevent unexpected breakage 
+    # when ubuntu-latest migrates to Ubuntu 26.04 in October 2026.
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
+        # v4 is the current stable major version. (The Node.js 20 warning for this 
+        # specific action is a known GitHub runner transition notice and is safe to ignore 
+        # as long as you are on the latest v4 patch).
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        # Updated from v4 to v6. v4 is officially deprecated, and v6 natively supports 
+        # the newer Node.js runtime, resolving the deprecation warning.
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        # Updated from v3 to v4. v4 is the latest stable release and resolves the 
+        # Node.js 20 deprecation warning.
+        uses: android-actions/setup-android@v4
 
       - name: Install Android SDK components
         run: |
@@ -172,6 +181,7 @@ jobs:
           ls -lh "${APK}"
 
       - name: Upload APK
+        # v4 is already the latest and fully supported.
         uses: actions/upload-artifact@v4
         with:
           name: Kitten-TTS-Android
