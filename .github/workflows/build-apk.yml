@@ -1,15 +1,20 @@
-name: Build Kitten TTS Mini APK
+name: Build & Release Kitten TTS Mini APK
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    tags:
+      - 'kitten' # Triggers when you push the 'kitten' tag
+
+# Grant permission to write to releases
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: Build Debug APK
-    # Pinned to 24.04 to avoid the "ubuntu-latest migrating to Ubuntu 26" notice
+    name: Build and Upload APK
     runs-on: ubuntu-24.04
 
     steps:
@@ -17,7 +22,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        # Updated from v4 to v6 to clear the official deprecation warning
         uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -26,13 +30,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.13' # Adjust this if your project uses a different Gradle version
-
-      - name: Show Java version
-        run: java -version
-
-      - name: Show Gradle version
-        run: gradle --version
+          gradle-version: '8.13'
 
       - name: Build Android APK
         run: gradle assembleDebug --no-daemon --stacktrace
@@ -44,9 +42,12 @@ jobs:
           test -f app/build/outputs/apk/debug/app-debug.apk
           echo "APK successfully generated."
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      # --- NEW STEP: Upload to GitHub Release ---
+      - name: Upload APK to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Kitten-TTS-Mini-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          tag_name: kitten
+          files: app/build/outputs/apk/debug/app-debug.apk
+          name: "Kitten TTS Mini Build"
+          body: "Automated build of Kitten TTS Mini APK"
+          fail_on_unmatched_files: true
