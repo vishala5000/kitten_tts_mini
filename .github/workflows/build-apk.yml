@@ -9,184 +9,71 @@ on:
 permissions:
   contents: read
 
+env:
+  ANDROID_API: "36"
+  BUILD_TOOLS: "35.0.0"
+  NDK_VERSION: "28.1.13356709"
+  GRADLE_VERSION: "8.13"
+
 jobs:
   build:
-    runs-on: ubuntu-22.04
-
-    env:
-      ANDROID_API: "36"
-      BUILD_TOOLS: "35.0.0"
-      NDK_VERSION: "28.1.13356709"
-      GRADLE_VERSION: "8.13"
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: "platform-tools"
+        uses: android-actions/setup-android@v3
 
-      - name: Accept Android SDK licenses
-        shell: bash
+      - name: Install Android SDK components
         run: |
           set -e
+
           yes | sdkmanager --licenses >/dev/null || true
 
-      - name: Install Android SDK
-        shell: bash
-        run: |
-          set -e
-
-          sdkmanager --install \
+          sdkmanager \
             "platform-tools" \
             "platforms;android-${ANDROID_API}" \
             "build-tools;${BUILD_TOOLS}" \
             "ndk;${NDK_VERSION}"
 
       - name: Verify Android SDK
-        shell: bash
         run: |
           set -e
-
-          SDK="${ANDROID_SDK_ROOT}"
-          BT="${SDK}/build-tools/${BUILD_TOOLS}"
 
           echo "ANDROID_HOME=${ANDROID_HOME}"
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
 
-          test -d "${SDK}/platforms/android-${ANDROID_API}"
-          test -d "${BT}"
-          test -d "${SDK}/ndk/${NDK_VERSION}"
+          test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_API}"
+          test -d "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}"
+          test -d "${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
 
-          test -x "${BT}/aapt2"
-          test -x "${BT}/d8"
-          test -x "${BT}/zipalign"
-          test -x "${BT}/apksigner"
-
-          "${BT}/aapt2" version
-          "${BT}/d8" --version
-          "${BT}/apksigner" --version
-
-          echo "Android SDK verification successful."
-
-      - name: Install Gradle
-        shell: bash
+      - name: Make Gradle executable
         run: |
-          set -e
+          chmod +x ./gradlew
 
-          mkdir -p "${HOME}/gradle"
-
-          curl -fL \
-            --retry 5 \
-            --retry-delay 3 \
-            --connect-timeout 30 \
-            --max-time 600 \
-            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-            -o "${HOME}/gradle/gradle.zip"
-
-          unzip -q \
-            "${HOME}/gradle/gradle.zip" \
-            -d "${HOME}/gradle"
-
-          echo "${HOME}/gradle/gradle-${GRADLE_VERSION}/bin" >> "${GITHUB_PATH}"
-
-      - name: Verify Gradle
-        shell: bash
+      - name: Clean
         run: |
-          set -e
-          gradle --version
-
-      - name: Download Kitten TTS model
-        shell: bash
-        run: |
-          set -e
-
-          MODEL_DIR="app/src/main/assets/model"
-          BASE_URL="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
-
-          mkdir -p "${MODEL_DIR}"
-
-          curl -fL \
-            --retry 5 \
-            --retry-delay 3 \
-            --connect-timeout 30 \
-            --max-time 1800 \
-            "${BASE_URL}/kitten_tts_mini_v0_8.onnx" \
-            -o "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
-
-          curl -fL \
-            --retry 5 \
-            --retry-delay 3 \
-            --connect-timeout 30 \
-            --max-time 300 \
-            "${BASE_URL}/config.json" \
-            -o "${MODEL_DIR}/config.json"
-
-          curl -fL \
-            --retry 5 \
-            --retry-delay 3 \
-            --connect-timeout 30 \
-            --max-time 1800 \
-            "${BASE_URL}/voices.npz" \
-            -o "${MODEL_DIR}/voices.npz"
-
-          echo "Kitten TTS model files:"
-          ls -lh "${MODEL_DIR}"
-
-      - name: Verify Kitten TTS files
-        shell: bash
-        run: |
-          set -e
-
-          MODEL_DIR="app/src/main/assets/model"
-
-          test -s "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
-          test -s "${MODEL_DIR}/config.json"
-          test -s "${MODEL_DIR}/voices.npz"
-
-          python3 - <<'PY'
-          import json
-
-          path = "app/src/main/assets/model/config.json"
-
-          with open(path, "r", encoding="utf-8") as f:
-              config = json.load(f)
-
-          print("config.json OK")
-          print("Keys:", list(config.keys()))
-          PY
+          ./gradlew clean --no-daemon
 
       - name: Build release APK
-        shell: bash
         run: |
           set -e
 
-          gradle \
+          ./gradlew \
+            :app:assembleRelease \
             --no-daemon \
-            --stacktrace \
-            clean \
-            assembleRelease
+            --stacktrace
 
-      - name: Find APK
-        shell: bash
-        run: |
-          set -e
-
-          find app/build/outputs/apk/release \
-            -type f \
-            -name "*.apk" \
-            -print
-
-      - name: Verify APK
-        shell: bash
+      - name: Locate unsigned APK
+        id: apk
         run: |
           set -e
 
@@ -200,58 +87,98 @@ jobs:
           test -n "${APK}"
           test -s "${APK}"
 
-          echo "APK: ${APK}"
+          echo "Unsigned APK:"
           ls -lh "${APK}"
+
+          echo "apk=${APK}" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate release signing key
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KITTEN_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KITTEN_KEY_PASSWORD }}
+        run: |
+          set -e
+
+          if [ -z "${KEYSTORE_PASSWORD}" ]; then
+            echo "KITTEN_KEYSTORE_PASSWORD secret is required."
+            exit 1
+          fi
+
+          if [ -z "${KEY_PASSWORD}" ]; then
+            echo "KITTEN_KEY_PASSWORD secret is required."
+            exit 1
+          fi
+
+          keytool \
+            -genkeypair \
+            -v \
+            -keystore kitten-release.jks \
+            -alias kitten \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass "${KEYSTORE_PASSWORD}" \
+            -keypass "${KEY_PASSWORD}" \
+            -dname "CN=Kitten TTS, OU=Android, O=Vishala, L=India, ST=Karnataka, C=IN"
+
+          test -s kitten-release.jks
+
+      - name: Sign APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KITTEN_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KITTEN_KEY_PASSWORD }}
+        run: |
+          set -e
+
+          UNSIGNED="${{ steps.apk.outputs.apk }}"
+          SIGNED="app/build/outputs/apk/release/Kitten-TTS-release.apk"
+
+          APKSIGNER="${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner"
+
+          test -x "${APKSIGNER}"
+          test -s "${UNSIGNED}"
+          test -s kitten-release.jks
+
+          "${APKSIGNER}" sign \
+            --ks kitten-release.jks \
+            --ks-key-alias kitten \
+            --ks-pass "pass:${KEYSTORE_PASSWORD}" \
+            --key-pass "pass:${KEY_PASSWORD}" \
+            --out "${SIGNED}" \
+            "${UNSIGNED}"
+
+          test -s "${SIGNED}"
+
+          echo "Signed APK:"
+          ls -lh "${SIGNED}"
+
+      - name: Verify signed APK
+        run: |
+          set -e
+
+          APK="app/build/outputs/apk/release/Kitten-TTS-release.apk"
+
+          test -s "${APK}"
 
           "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/apksigner" \
             verify \
             --verbose \
             "${APK}"
 
-      - name: Check APK alignment
-        shell: bash
-        run: |
-          set -e
+          echo "=========================================="
+          echo "SIGNED APK VERIFIED SUCCESSFULLY"
+          echo "=========================================="
 
-          APK="$(find \
-            app/build/outputs/apk/release \
-            -maxdepth 1 \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)"
-
-          test -n "${APK}"
-
-          "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}/zipalign" \
-            -c \
-            -P 16 \
-            -v \
-            4 \
-            "${APK}"
-
-      - name: Create final APK
-        shell: bash
-        run: |
-          set -e
-
-          APK="$(find \
-            app/build/outputs/apk/release \
-            -maxdepth 1 \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)"
-
-          test -n "${APK}"
-
-          cp "${APK}" \
-            "app/build/outputs/apk/release/KittenTTS-Release.apk"
-
-          ls -lh \
-            "app/build/outputs/apk/release/KittenTTS-Release.apk"
+          ls -lh "${APK}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: KittenTTS-Android-Release
-          path: app/build/outputs/apk/release/KittenTTS-Release.apk
+          name: Kitten-TTS-Android
+          path: app/build/outputs/apk/release/Kitten-TTS-release.apk
           if-no-files-found: error
+
+      - name: Cleanup signing material
+        if: always()
+        run: |
+          rm -f kitten-release.jks
