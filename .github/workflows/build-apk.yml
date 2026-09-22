@@ -27,18 +27,29 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
+      # IMPORTANT:
+      # Do NOT use packages: tools
+      # "tools" is obsolete and causes:
+      # Warning: Failed to find package 'tools'
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools"
 
       - name: Accept Android SDK licenses
         shell: bash
         run: |
+          set -e
+
           yes | sdkmanager --licenses >/dev/null || true
 
       - name: Install required Android packages
         shell: bash
         run: |
+          set -e
+
           sdkmanager --install \
             "platform-tools" \
             "platforms;android-${ANDROID_API}" \
@@ -48,16 +59,38 @@ jobs:
       - name: Verify Android SDK
         shell: bash
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          sdkmanager --list_installed | grep -E \
-            "platform-tools|platforms;android-${ANDROID_API}|build-tools;${BUILD_TOOLS}|ndk;${NDK_VERSION}" \
-            || true
+          set -e
+
+          echo "=========================================="
+          echo "ANDROID SDK"
+          echo "=========================================="
+
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+
+          echo
+          echo "Installed packages:"
+          sdkmanager --list_installed
+
+          echo
+          echo "Checking required packages..."
+
+          test -d "${ANDROID_SDK_ROOT}/platforms/android-${ANDROID_API}"
+          test -d "${ANDROID_SDK_ROOT}/build-tools/${BUILD_TOOLS}"
+          test -d "${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}"
+
+          echo
+          echo "Required Android SDK packages are installed."
 
       - name: Make Gradle executable
         shell: bash
         run: |
           chmod +x ./gradlew
+
+      - name: Verify Gradle
+        shell: bash
+        run: |
+          ./gradlew --version
 
       - name: Download Kitten TTS model
         shell: bash
@@ -68,18 +101,33 @@ jobs:
 
           BASE_URL="https://github.com/vishala5000/kitten_tts_mini/releases/download/kitten"
 
-          curl -fL --retry 5 --retry-delay 3 \
+          echo "Downloading Kitten TTS model..."
+
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            --connect-timeout 30 \
+            --max-time 1800 \
             "${BASE_URL}/kitten_tts_mini_v0_8.onnx" \
             -o app/src/main/assets/model/kitten_tts_mini_v0_8.onnx
 
-          curl -fL --retry 5 --retry-delay 3 \
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            --connect-timeout 30 \
+            --max-time 300 \
             "${BASE_URL}/config.json" \
             -o app/src/main/assets/model/config.json
 
-          curl -fL --retry 5 --retry-delay 3 \
+          curl -fL \
+            --retry 5 \
+            --retry-delay 3 \
+            --connect-timeout 30 \
+            --max-time 1800 \
             "${BASE_URL}/voices.npz" \
             -o app/src/main/assets/model/voices.npz
 
+          echo
           echo "Downloaded model files:"
           ls -lh app/src/main/assets/model
 
@@ -88,9 +136,20 @@ jobs:
         run: |
           set -e
 
-          test -s app/src/main/assets/model/kitten_tts_mini_v0_8.onnx
-          test -s app/src/main/assets/model/config.json
-          test -s app/src/main/assets/model/voices.npz
+          MODEL_DIR="app/src/main/assets/model"
+
+          test -s "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
+          test -s "${MODEL_DIR}/config.json"
+          test -s "${MODEL_DIR}/voices.npz"
+
+          echo "ONNX:"
+          ls -lh "${MODEL_DIR}/kitten_tts_mini_v0_8.onnx"
+
+          echo "Config:"
+          ls -lh "${MODEL_DIR}/config.json"
+
+          echo "Voices:"
+          ls -lh "${MODEL_DIR}/voices.npz"
 
           python3 - <<'PY'
           import json
@@ -107,6 +166,8 @@ jobs:
       - name: Build release APK
         shell: bash
         run: |
+          set -e
+
           ./gradlew \
             --no-daemon \
             --stacktrace \
@@ -116,7 +177,17 @@ jobs:
       - name: Locate APK
         shell: bash
         run: |
-          find app/build/outputs/apk -type f -name "*.apk" -print
+          set -e
+
+          echo "=========================================="
+          echo "GENERATED APK"
+          echo "=========================================="
+
+          find app/build/outputs/apk \
+            -type f \
+            -name "*.apk" \
+            -print \
+            -exec ls -lh {} \;
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
